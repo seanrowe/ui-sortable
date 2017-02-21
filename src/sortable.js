@@ -17,7 +17,9 @@
     /**
      * Return the index of ui.item among the items we can't just do ui.item.index()
      * because there it might have siblings which are not items
-     * @param {any} item
+     * 
+     * @param {angular.IAugmentedJQuery} item
+     * @return {number}
      */
     var getItemIndex = function (item) {
         return item.parent()
@@ -28,7 +30,7 @@
     /**
      * getSortableWidgetInstance
      * @param {angular.IAugmentedJQuery} element
-     * @return {any} || null
+     * @return Object || null
      */
     var getSortableWidgetInstance = function (element) {
         // this is a fix to support jquery-ui prior to v1.11.x
@@ -40,28 +42,6 @@
         }
 
         return null;
-    };
-
-    /**
-     * combineCallbacks
-     * @param {Function} first
-     * @param {Function} second
-     * @returns {*}
-     */
-    var combineCallbacks = function (first, second) {
-        var firstIsFunc = typeof first === "function",
-            secondIsFunc = typeof second === "function";
-
-        if (firstIsFunc && secondIsFunc) {
-            return function () {
-                first.apply(this, arguments);
-                second.apply(this, arguments);
-            };
-        } else if (secondIsFunc) {
-            return second;
-        }
-
-        return first;
     };
 
     var Wrappers = (function () {
@@ -418,7 +398,38 @@
         return callback;
     }());
 
-    var patchSortableOption = function (key, value) {
+    /**
+     * combineCallbacks
+     * @param {Function} first
+     * @param {Function} second
+     * @returns {*}
+     */
+    var combineCallbacks = function (first, second) {
+        var firstIsFunc = typeof first === "function",
+            secondIsFunc = typeof second === "function";
+
+        if (firstIsFunc && secondIsFunc) {
+            return function () {
+                first.apply(this, arguments);
+                second.apply(this, arguments);
+            };
+        } else if (secondIsFunc) {
+            return second;
+        }
+
+        return first;
+    };
+
+    /**
+     * 
+     * @param key
+     * @param value
+     * @param {angular.IScope} scope
+     * @param {Callbacks} callbacks
+     * @param {Wrappers} wrappers
+     * @returns {*}
+     */
+    var patchSortableOption = function (key, value, scope, callbacks, wrappers) {
         if (callbacks[key]) {
             if (key === "stop") {
                 // call apply after stop
@@ -430,6 +441,7 @@
                     ui.item.sortable._destroy();
                 });
             }
+            
             // wrap the callback
             value = combineCallbacks(callbacks[key], value);
         } else if (wrappers[key]) {
@@ -444,36 +456,74 @@
         return value;
     };
 
+    /**
+     * hasSortingHelper
+     * @param {angular.IAugmentedJQuery} element
+     * @param ui
+     * @returns {boolean|*}
+     */
     var hasSortingHelper = function (element, ui) {
+        //noinspection JSUnresolvedFunction
         var helperOption = element.sortable("option", "helper");
         return helperOption === "clone" || (typeof helperOption === "function" && ui.item.sortable.isCustomHelperUsed());
     };
 
+    /**
+     *
+     * @param {angular.IAugmentedJQuery} element
+     * @param ui
+     * @param savedNodes
+     * @returns {*}
+     */
     var getSortingHelper = function(element, ui, savedNodes) {
         var result = null;
+        
+        //noinspection JSUnresolvedFunction
         if (hasSortingHelper(element, ui) &&
             element.sortable("option", "appendTo") === "parent") {
-            // The .ui-sortable-helper element (that's the default class name)
-            // is placed last.
+            
+            // The .ui-sortable-helper element (that's the default class name) is placed last.
             result = savedNodes.last();
         }
+        
         return result;
     };
 
-    // thanks jquery-ui
+    /**
+     * isFloating
+     * 
+     * thanks jquery-ui
+     * 
+     * @param {angular.IAugmentedJQuery} item
+     * @returns {boolean}
+     */
     var isFloating = function(item) {
         return (/left|right/).test(item.css("float")) || (/inline|table-cell/).test(item.css("display"));
     };
 
+    /**
+     * 
+     * @param {Array} elementScopes
+     * @param {angular.IAugmentedJQuery} element
+     * @returns {*}
+     */
     var getElementContext = function(elementScopes, element) {
-        for (var i = 0; i < elementScopes.length; i++) {
-            var c = elementScopes[i];
+        var c, i;
+        
+        for (i = 0; i < elementScopes.length; i++) {
+            c = elementScopes[i];
+            
             if (c.element[0] === element[0]) {
                 return c;
             }
         }
     };
 
+    /**
+     * 
+     * @param callbacks
+     * @param opts
+     */
     var initializeOptsFromCallbacks = function(callbacks, opts) {
         angular.forEach(callbacks, function (value, key) {
             if (!(key in opts)) {
@@ -484,84 +534,117 @@
 
     /**
      *
-     * @param {any} oldVal
-     * @param {any} newVal
-     * @param {any} opts
-     * @param {any} optsDiff
+     * @param oldVals
+     * @param newVal
+     * @param opts
+     * @param optsDiff
+     * @param directiveOpts
+     * @param {angular.IScope} scope
+     * @param callbacks
+     * @param wrappers
      */
-    var resetDeletedOptions = function(oldVal, newVal, opts, optsDiff) {
+    var resetDeletedOptions = function(oldVals, newVal, opts, optsDiff, directiveOpts, scope, callbacks, wrappers) {
         var defaultOptions;
 
-        angular.forEach(oldVal, function (oldValue, key) {
-            if (!newVal || !(key in newVal)) {
+        angular.forEach(oldVals,
+
+            /**
+             * @param {string} oldValue
+             * @param {string} key
+             */
+            function (oldValue, key) {
+                
+                var defaultValue;
+                
+                if (newVal && (key in newVal)) {
+                    return;
+                }
+                
                 if (key in directiveOpts) {
                     if (key === "ui-floating") {
                         opts[key] = "auto";
                     } else {
-                        opts[key] = patchSortableOption(key, undefined);
+                        opts[key] = patchSortableOption(key, undefined, scope, callbacks, wrappers);
                     }
+                    
                     return;
                 }
 
                 if (!defaultOptions) {
+                    
+                    /** @namespace angular.element.ui */
                     defaultOptions = angular.element.ui.sortable().options;
                 }
-                var defaultValue = defaultOptions[key];
-                defaultValue = patchSortableOption(key, defaultValue);
+                
+                defaultValue = defaultOptions[key];
+                defaultValue = patchSortableOption(key, defaultValue, scope, callbacks, wrappers);
 
                 if (!optsDiff) {
                     optsDiff = {};
                 }
+                
                 optsDiff[key] = defaultValue;
                 opts[key] = defaultValue;
             }
-        });
+        );
     };
 
     /**
      * patchUISortableOptions
-     * @param {any} newVal
-     * @param {any} oldVal
-     * @param {any} opts
-     * @param {any} sortableWidgetInstance
+     * @param newVal
+     * @param oldVal
+     * @param opts
+     * @param sortableWidgetInstance
+     * @param {angular.IScope} scope
+     * @param callbacks
+     * @param wrappers
      */
-    var patchUISortableOptions = function (newVal, oldVal, opts, sortableWidgetInstance) {
+    var patchUISortableOptions = function (newVal, oldVal, opts, sortableWidgetInstance, scope, callbacks, wrappers) {
 
+        // only initialize it in case we have to
+        // update some options of the sortable
+        var optsDiff = null;
+        
         // for this directive to work we have to attach some callbacks
         // add the key in the opts object so that
         // the patch function detects and handles it
         initializeOptsFromCallbacks(callbacks, opts);
 
-        // only initialize it in case we have to
-        // update some options of the sortable
-        var optsDiff = null;
-
+        // reset deleted options to default
         if (oldVal) {
-            // reset deleted options to default
             resetDeletedOptions(oldVal, newVal, opts, optsDiff);
         }
 
         // update changed options
-        angular.forEach(newVal, function (value, key) {
-            // if it's a custom option of the directive,
-            // handle it appropriately
-            if (key in directiveOpts) {
-                if (key === "ui-floating" && (value === false || value === true) && sortableWidgetInstance) {
-                    sortableWidgetInstance.floating = value;
+        angular.forEach(newVal,
+
+            /**
+             * @param {string} value
+             * @param {string} key
+             */
+            function (value, key) {
+            
+                // if it's a custom option of the directive,
+                // handle it appropriately
+                if (key in directiveOpts) {
+                    if (key === "ui-floating" && (value === false || value === true) && sortableWidgetInstance) {
+                        sortableWidgetInstance.floating = value;
+                    }
+    
+                    opts[key] = patchSortableOption(key, value, scope, callbacks, wrappers);
+                    return;
                 }
-
-                opts[key] = patchSortableOption(key, value);
-                return;
+    
+                value = patchSortableOption(key, value, scope, callbacks, wrappers);
+    
+                if (!optsDiff) {
+                    optsDiff = {};
+                }
+                
+                optsDiff[key] = value;
+                opts[key] = value;
             }
-
-            value = patchSortableOption(key, value);
-
-            if (!optsDiff) {
-                optsDiff = {};
-            }
-            optsDiff[key] = value;
-            opts[key] = value;
-        });
+        );
 
         return optsDiff;
     };
@@ -571,7 +654,7 @@
      * @param {angular.IScope} scope
      * @param {angular.IAugmentedJQuery} element
      * @param {angular.INgModelController} ngModel
-     * @param {any} opts
+     * @param opts
      */
     var init = function (scope, element, ngModel, opts) {
         if (!ngModel) {
@@ -582,7 +665,7 @@
             // When we add or remove elements, we need the sortable to 'refresh'
             // so it can find the new/removed elements.
             scope.$watchCollection("ngModel",
-                function (newValue, oldValue) {
+                function (newValue) {
 
                     // Timeout to let ng-repeat modify the DOM
                     timeout(function () {
@@ -592,6 +675,8 @@
                         // ensure that the jquery-ui-sortable widget instance
                         // is still bound to the directive's element
                         if (!!getSortableWidgetInstance(element)) {
+                            
+                            //noinspection JSUnresolvedFunction
                             element.sortable("refresh");
                         }
 
@@ -600,29 +685,39 @@
 
             scope.$watchCollection("uiSortable",
                 function (newVal, oldVal) {
+                    var optsDiff,
+                        sortableWidgetInstance;
+                    
                     // ensure that the jquery-ui-sortable widget instance
                     // is still bound to the directive's element
-                    var sortableWidgetInstance = getSortableWidgetInstance(element);
+                    sortableWidgetInstance = getSortableWidgetInstance(element);
+                    
                     if (!!sortableWidgetInstance) {
-                        var optsDiff = patchUISortableOptions(newVal, oldVal, opts, sortableWidgetInstance);
+                        optsDiff = patchUISortableOptions(newVal, oldVal, opts, sortableWidgetInstance, scope, callbacks, wrappers);
 
                         if (optsDiff) {
+                            
+                            //noinspection JSUnresolvedFunction
                             element.sortable("option", optsDiff);
                         }
                     }
                 },
                 true);
 
+            // @todo Sean you stopped here. Need to make each method accept an object with all the attributes 
+            // @todo instead of how it is now
             patchUISortableOptions(opts);
         }
 
         // Create sortable
+        //noinspection JSUnresolvedFunction
         element.sortable(opts);
     };
 
     /**
      * isDisabled
-     * @param {angular.IScope} scope
+     * @param scope
+     * @namespace scope.uiSortable
      * @return {boolean}
      */
     var isDisabled = function(scope) {
@@ -631,10 +726,11 @@
 
     /**
      * link
-     * @param {angular.IScope} scope
-     * @param {any} element
-     * @param {any} attrs
-     * @param {any} ngModel
+     * @param scope
+     * @param {angular.IAugmentedJQuery} element
+     * @param {angular.IAttributes} attrs
+     * @param {angular.INgModelController} ngModel
+     * @namespace scope.uiSortable
      */
     var link = function (scope, element, attrs, ngModel) {
         var opts = {},
@@ -665,15 +761,14 @@
 
     /**
      * constructor
-     * @param {any} _uiSortableConfig
-     * @param {any} $timeout
-     * @param {any} $log
+     * @param _uiSortableConfig
+     * @param {angular.ITimeoutService} $timeout
+     * @param {angular.ILogService} $log
      */
     var constructor = function (_uiSortableConfig, $timeout, $log) {
         uiSortableConfig = _uiSortableConfig;
         timeout = $timeout;
         log = $log;
-
 
         return {
             require: "?ngModel",
